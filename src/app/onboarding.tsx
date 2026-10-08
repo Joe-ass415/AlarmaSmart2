@@ -4,12 +4,11 @@ import { useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Button, Card, Chip, Icon, type IconName } from '../components/ui';
 import { tapFeedback } from '../core/haptics';
 import { useSettings } from '../state/SettingsContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { radius, spacing, typography } from '../theme/tokens';
-import { Button, Card, Chip } from '../components/ui';
-import { Icon, type IconName } from '../components/ui';
 
 const STEPS = [
   {
@@ -20,7 +19,7 @@ const STEPS = [
   {
     icon: 'alarm' as IconName,
     title: 'Alarmas a tu medida',
-    body: 'Elige días, etiqueta, sonido, vibración y cuántas agitaciones necesitas. Cada alarma se programa como notificación local, sin servidor.',
+    body: 'Elige días, etiqueta, sonido, vibración y cuántas agitaciones necesitas. Cada alarma se programa localmente y se sincroniza en tu cuenta.',
   },
   {
     icon: 'bell' as IconName,
@@ -48,7 +47,7 @@ export default function OnboardingScreen() {
       return;
     }
     update({ userName: name.trim() || 'Tú', onboarded: true });
-    router.replace('/(tabs)');
+    router.replace('/auth' as any);
   };
 
   return (
@@ -97,7 +96,7 @@ export default function OnboardingScreen() {
               ]}
             />
             <Text style={[typography.micro, { color: colors.textFaint }]}>
-              Todo se guarda en este dispositivo. Sin cuentas, sin servidores.
+              Tus preferencias, alarmas y suscripciones se sincronizan con tu cuenta.
             </Text>
           </Card>
         ) : null}
@@ -124,7 +123,7 @@ export default function OnboardingScreen() {
         <Pressable
           onPress={() => {
             update({ userName: name.trim() || 'Tú', onboarded: true });
-            router.replace('/(tabs)');
+            router.replace('/auth' as any);
           }}
           hitSlop={8}
           accessibilityRole="button"
@@ -135,7 +134,7 @@ export default function OnboardingScreen() {
 
         <View style={styles.chipRow}>
           <Chip label="Gratis" size="sm" tone="success" />
-          <Chip label="Sin servidor" size="sm" />
+          <Chip label="Sincronizado" size="sm" />
           <Chip label="Premium opcional" size="sm" tone="warning" />
         </View>
       </ScrollView>

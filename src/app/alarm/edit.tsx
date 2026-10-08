@@ -1,17 +1,17 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ModalHeader } from '../../components/modal-header';
+import { Button, Card, Chip, Icon, SegmentedControl, Stepper, SummaryRow, ToggleRow, WeekdayPicker } from '../../components/ui';
 import { formatDays, formatTime, nextOccurrence } from '../../core/date';
-import { getSound, SOUNDS, isSoundLocked } from '../../core/sounds';
+import { getSound, isSoundLocked, SOUNDS } from '../../core/sounds';
 import type { Alarm, DismissMode, HapticStrength } from '../../core/types';
 import { useAlarms, type AlarmDraft } from '../../state/AlarmsContext';
 import { useSettings } from '../../state/SettingsContext';
 import { useTheme } from '../../theme/ThemeProvider';
 import { radius, spacing, typography } from '../../theme/tokens';
-import { Button, Card, Chip, Icon, SegmentedControl, Stepper, SummaryRow, ToggleRow, WeekdayPicker } from '../../components/ui';
-import { ModalHeader } from '../../components/modal-header';
 
 const DEFAULT_DRAFT: AlarmDraft = {
   label: 'Despertar',
@@ -50,9 +50,8 @@ function toDraft(alarm: Alarm): AlarmDraft {
   };
 }
 
-type AlarmEditParams = { id?: string; hour?: string; minute?: string; fromEvent?: string };
+type AlarmEditParams = { id?: string; hour?: string; minute?: string; fromEvent?: string; soundId?: string };
 
-/** Prefills the time when the form is opened from a calendar event. */
 function fromParams(params: AlarmEditParams, base: AlarmDraft): AlarmDraft {
   const hour = Number(params.hour);
   const minute = Number(params.minute);
@@ -66,7 +65,7 @@ export default function EditAlarmScreen() {
   const { colors } = useTheme();
   const { settings } = useSettings();
   const { alarms, createAlarm, updateAlarm, deleteAlarm } = useAlarms();
-  const params = useLocalSearchParams<{ id?: string; hour?: string; minute?: string; fromEvent?: string }>();
+  const params = useLocalSearchParams<AlarmEditParams>();
 
   const editing = useMemo(() => alarms.find((alarm) => alarm.id === params.id), [alarms, params.id]);
 
@@ -76,13 +75,17 @@ export default function EditAlarmScreen() {
   const [saving, setSaving] = useState(false);
   const [loadedId, setLoadedId] = useState<string | undefined>(params.id);
 
-  // Adjusting state during render is the supported way to reload the form when
-  // the screen switches to a different alarm; an effect would show stale fields
-  // for one frame and can clobber unsaved edits.
   if (editing && loadedId !== editing.id) {
     setLoadedId(editing.id);
     setDraft(toDraft(editing));
   }
+
+  // Escuchar cuando el usuario regresa de la pantalla de sonidos con una nueva selección
+  useEffect(() => {
+    if (params.soundId) {
+      setDraft((current) => ({ ...current, soundId: params.soundId as string }));
+    }
+  }, [params.soundId]);
 
   const sound = getSound(draft.soundId);
   const soundLocked = isSoundLocked(sound, settings.premium);
@@ -232,7 +235,12 @@ export default function EditAlarmScreen() {
           <SummaryRow
             label="Sonido"
             value={sound.name}
-            onPress={() => router.push('/sounds')}
+            onPress={() =>
+              router.push({
+                pathname: '/sounds',
+                params: { selectedId: draft.soundId, alarmId: params.id },
+              } as any)
+            }
             icon={<Icon name="volume" size={17} color={colors.textMuted} />}
             locked={soundLocked}
             lockedHint={soundLocked ? 'Requiere Premium' : undefined}
@@ -278,7 +286,7 @@ export default function EditAlarmScreen() {
             />
           </View>
           <Text style={[typography.micro, { color: colors.textFaint }]}>
-            0 = sona hasta completar el reto o hasta que pulses «Detener».
+            0 = suena hasta completar el reto o hasta que pulses «Detener».
           </Text>
         </Card>
 
@@ -357,7 +365,6 @@ function formatRelativeDay(date: Date) {
   if (date.toDateString() === tomorrow.toDateString()) return 'mañana';
   return new Intl.DateTimeFormat('es-ES', { weekday: 'long' }).format(date);
 }
-
 
 const styles = StyleSheet.create({
   screen: {

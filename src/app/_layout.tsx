@@ -10,8 +10,9 @@ import {
   PlusJakartaSans_700Bold,
   useFonts as usePlusJakarta,
 } from '@expo-google-fonts/plus-jakarta-sans';
+import { StripeProvider } from '@stripe/stripe-react-native';
 import * as Notifications from 'expo-notifications';
-import { DarkTheme, DefaultTheme, Redirect, router, Stack, ThemeProvider as NavigationThemeProvider, usePathname } from 'expo-router';
+import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider, Redirect, router, Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -19,10 +20,12 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ensureChannels } from '../core/notifications';
-import { SettingsProvider, useSettings } from '../state/SettingsContext';
 import { AlarmsProvider, useAlarms } from '../state/AlarmsContext';
 import { RemindersProvider } from '../state/RemindersContext';
+import { SettingsProvider, useSettings } from '../state/SettingsContext';
 import { useTheme } from '../theme/ThemeProvider';
+
+const STRIPE_PUBLISHABLE_KEY = 'pk_test_51QuynDP9KvBAcos6e6FWEyCyXZCL4aLGJ1MUIXlAodhIJ0dq91HximF8chnkVkUEMrjkFcOqY0RgY71eCjVQvZ9m00uCWP1EFB';
 
 export default function RootLayout() {
   const [manropeLoaded] = useManrope({
@@ -41,31 +44,32 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
-        <SettingsProvider>
-          <AlarmsProvider>
-            <RemindersProvider>
-              <AppShell ready={fontsReady} />
-            </RemindersProvider>
-          </AlarmsProvider>
-        </SettingsProvider>
+        <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY}>
+          <SettingsProvider>
+            <AlarmsProvider>
+              <RemindersProvider>
+                <AppShell ready={fontsReady} />
+              </RemindersProvider>
+            </AlarmsProvider>
+          </SettingsProvider>
+        </StripeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
 
 function AppShell({ ready }: { ready: boolean }) {
-  const { colorScheme, settings, ready: settingsReady } = useSettings();
+  const { colorScheme, settings, ready: settingsReady, currentUser } = useSettings();
   const pathname = usePathname();
   const { ringing, startRinging } = useAlarms();
   const theme = useTheme();
 
-  // Android needs at least one channel to exist before it shows the
-  // notification permission dialog.
+  // Android necesita al menos un canal creado antes de mostrar el diálogo de permisos
   useEffect(() => {
     ensureChannels().catch(() => {});
   }, []);
 
-  // Foreground delivery: a notification that arrives while the app is open.
+  // Notificación que llega mientras la app está abierta
   useEffect(() => {
     const subscription = Notifications.addNotificationReceivedListener((notification) => {
       const data = notification.request.content.data as { type?: string; alarmId?: string; reminderId?: string };
@@ -75,13 +79,12 @@ function AppShell({ ready }: { ready: boolean }) {
     return () => subscription.remove();
   }, [startRinging]);
 
-  // Background / cold start: the app was opened by tapping a notification.
+  // La app fue abierta tocando una notificación
   useEffect(() => {
     const response = Notifications.getLastNotificationResponse();
     const data = response?.notification.request.content.data as { type?: string; alarmId?: string } | undefined;
     if (data?.type === 'alarm' && data.alarmId) startRinging(data.alarmId, true);
 
-    // Renamed from `addNotificationResponseListener` in SDK 57.
     const subscription = Notifications.addNotificationResponseReceivedListener((next) => {
       const payload = next.notification.request.content.data as { type?: string; alarmId?: string };
       if (payload.type === 'alarm' && payload.alarmId) startRinging(payload.alarmId, true);
@@ -90,19 +93,29 @@ function AppShell({ ready }: { ready: boolean }) {
     return () => subscription.remove();
   }, [startRinging]);
 
-  // A ringing alarm owns the screen: it is presented over the whole navigator.
+  // Alarma sonando
   useEffect(() => {
     if (ringing) router.push('/alarm/ringing');
   }, [ringing]);
 
   const navigationTheme = colorScheme === 'dark' ? DarkTheme : DefaultTheme;
 
-  // First launch lands on onboarding; every later launch skips it.
+  // 1. Redirección a Onboarding si es la primera vez que abre la app
   if (ready && settingsReady && !settings.onboarded && pathname !== '/onboarding') {
     return <Redirect href="/onboarding" />;
   }
 
-  if (!ready) {
+  // 2. Redirección automática a la pantalla de Auth si no hay usuario logueado
+  if (ready && settingsReady && settings.onboarded) {
+    if (!currentUser && pathname !== '/auth' && pathname !== '/onboarding') {
+      return <Redirect href={"/auth" as any} />;
+    }
+    if (currentUser && pathname === '/auth') {
+      return <Redirect href={"/(tabs)" as any} />;
+    }
+  }
+
+  if (!ready || !settingsReady) {
     return <View style={[styles.splash, { backgroundColor: theme.colors.background }]} />;
   }
 
@@ -129,6 +142,7 @@ function AppShell({ ready }: { ready: boolean }) {
         }}
       >
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="auth" options={{ gestureEnabled: false, animation: 'fade' }} />
         <Stack.Screen
           name="alarm/ringing"
           options={{

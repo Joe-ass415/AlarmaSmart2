@@ -1,6 +1,9 @@
+import { onAuthStateChanged } from 'firebase/auth';
+import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react';
 
 import { nextOccurrence } from '../core/date';
+import { auth, db } from '../core/firebase';
 import {
   cancelScheduled,
   rehydrate,
@@ -77,7 +80,7 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
   /** Prevents the ticker from re-ringing an alarm already on screen. */
   const handledRef = useRef(new Set<string>());
 
-  /* ----------------------------- load ----------------------------- */
+  /* ----------------------------- load local ----------------------------- */
   useEffect(() => {
     let mounted = true;
     Promise.all([
@@ -94,6 +97,28 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
+  /* --------------------- firebase sync (realtime) --------------------- */
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        const alarmsRef = collection(db, 'users', user.uid, 'alarms');
+        const unsubscribeSnapshot = onSnapshot(alarmsRef, (snapshot) => {
+          const remoteAlarms: Alarm[] = [];
+          snapshot.forEach((docSnap) => {
+            remoteAlarms.push(docSnap.data() as Alarm);
+          });
+          if (remoteAlarms.length > 0) {
+            setAlarms(remoteAlarms);
+            persistAlarms(remoteAlarms);
+          }
+        });
+        return () => unsubscribeSnapshot();
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
   /* --------------------- notification permission --------------------- */
   useEffect(() => {
     if (!ready) return;
@@ -107,13 +132,6 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
   }, [ready]);
 
   /* ------------------------- rescheduling --------------------------- */
-  // Re-schedules when the alarm set, the relevant preferences, or the
-  // notification permission change. Android/iOS drop pending triggers on
-  // reinstall, so this is the single place that rebuilds them.
-  //
-  // The effect depends on a primitive signature rather than the `alarms` array
-  // itself: it writes back into that array, so depending on the array identity
-  // would re-trigger the effect on every write.
   const scheduleSignature = useMemo(() => JSON.stringify(alarms), [alarms]);
 
   useEffect(() => {
@@ -149,8 +167,6 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
   }, [ready, settingsReady, settings.alarmNotificationsEnabled, permission, scheduleSignature]);
 
   /* ------------------------- in-app ticker -------------------------- */
-  // Expo Go cannot run a background shake listener, so an alarm that becomes
-  // due while the app is open is detected here and opens the ring screen.
   useEffect(() => {
     if (!ready || !settingsReady) return;
     if (!settings.alarmNotificationsEnabled) return;
@@ -196,6 +212,13 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
         persistAlarms(next);
         return next;
       });
+
+      // Guardar en Firestore si el usuario está autenticado
+      if (auth.currentUser) {
+        const alarmRef = doc(db, 'users', auth.currentUser.uid, 'alarms', alarm.id);
+        void setDoc(alarmRef, alarm);
+      }
+
       return alarm;
     },
     []
@@ -203,6 +226,7 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
 
   const updateAlarm = useCallback(async (id: string, patch: Partial<AlarmDraft>) => {
     setAlarms((current) => {
+      let updatedTarget: Alarm | null = null;
       const next = current.map((alarm) => {
         if (alarm.id !== id) return alarm;
         const merged: Alarm = { ...alarm, ...patch, updatedAt: Date.now() };
@@ -211,9 +235,18 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
         if (timeChanged || daysChanged || !merged.enabled) {
           merged.nextOccurrenceAt = merged.enabled ? nextOccurrence(merged.hour, merged.minute, merged.weekdays).getTime() : null;
         }
+        updatedTarget = merged;
         return merged;
       });
+
       persistAlarms(next);
+
+      // Actualizar en Firestore
+      if (auth.currentUser && updatedTarget) {
+        const alarmRef = doc(db, 'users', auth.currentUser.uid, 'alarms', id);
+        void setDoc(alarmRef, updatedTarget, { merge: true });
+      }
+
       return next;
     });
   }, []);
@@ -226,22 +259,41 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
       persistAlarms(next);
       return next;
     });
+
     handledRef.current.delete(id);
+
+    // Eliminar de Firestore
+    if (auth.currentUser) {
+      const alarmRef = doc(db, 'users', auth.currentUser.uid, 'alarms', id);
+      void deleteDoc(alarmRef);
+    }
   }, []);
 
   const toggleAlarm = useCallback(async (id: string, enabled: boolean) => {
     setAlarms((current) => {
-      const next = current.map((alarm) =>
-        alarm.id === id
-          ? {
-              ...alarm,
-              enabled,
-              updatedAt: Date.now(),
-              nextOccurrenceAt: enabled ? nextOccurrence(alarm.hour, alarm.minute, alarm.weekdays).getTime() : null,
-            }
-          : alarm
-      );
+      let toggledTarget: Alarm | null = null;
+      const next = current.map((alarm) => {
+        if (alarm.id === id) {
+          const updated = {
+            ...alarm,
+            enabled,
+            updatedAt: Date.now(),
+            nextOccurrenceAt: enabled ? nextOccurrence(alarm.hour, alarm.minute, alarm.weekdays).getTime() : null,
+          };
+          toggledTarget = updated;
+          return updated;
+        }
+        return alarm;
+      });
+
       persistAlarms(next);
+
+      // Actualizar en Firestore
+      if (auth.currentUser && toggledTarget) {
+        const alarmRef = doc(db, 'users', auth.currentUser.uid, 'alarms', id);
+        void setDoc(alarmRef, toggledTarget, { merge: true });
+      }
+
       return next;
     });
   }, []);
@@ -305,7 +357,6 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
       handledRef.current.delete(alarmId);
       setRinging(null);
 
-      // A snooze is a one-shot notification, so it survives app restarts.
       if (alarm && settings.alarmNotificationsEnabled && permission === 'granted') {
         const { scheduleAlarm } = await import('../core/notifications');
         await cancelScheduled(alarm.notificationIds);
@@ -367,7 +418,6 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
       };
     });
 
-    // Longest run of consecutive days with at least one ring.
     const dayKeys = Array.from(
       new Set(dismissLog.map((e) => {
         const d = new Date(e.rangAt);

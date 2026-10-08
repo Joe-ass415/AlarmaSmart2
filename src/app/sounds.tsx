@@ -1,16 +1,16 @@
 import { useAudioPlayer } from 'expo-audio';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ModalHeader } from '../components/modal-header';
+import { Button, Card, Chip, Icon, SegmentedControl } from '../components/ui';
 import { tapFeedback } from '../core/haptics';
 import { SOUNDS, freeSoundCount, isSoundLocked, type SoundEntry } from '../core/sounds';
 import { useSettings } from '../state/SettingsContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { radius, spacing, typography } from '../theme/tokens';
-import { Button, Card, Chip, SegmentedControl , Icon } from '../components/ui';
-import { ModalHeader } from '../components/modal-header';
 
 type Tier = 'all' | 'free' | 'premium';
 
@@ -19,10 +19,36 @@ export default function SoundsScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { settings, setPremium } = useSettings();
+  const params = useLocalSearchParams<{ selectedId?: string; alarmId?: string }>();
+
   const [tier, setTier] = useState<Tier>('all');
   const [previewingId, setPreviewingId] = useState<string | null>(null);
 
   const visible = useMemo(() => SOUNDS.filter((sound) => tier === 'all' || sound.tier === tier), [tier]);
+
+  const handleSelectSound = (sound: SoundEntry) => {
+    const locked = isSoundLocked(sound, settings.premium);
+    if (locked) {
+      Alert.alert(
+        'Sonido Premium',
+        'Este sonido requiere una suscripción Premium. ¿Deseas adquirir el plan Premium?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Ver Premium', onPress: () => router.push('/(tabs)/premium') },
+        ]
+      );
+      return;
+    }
+
+    tapFeedback();
+    // Si la pantalla fue abierta desde la edición de alarma, regresa devolviendo el soundId seleccionado
+    if (params.selectedId !== undefined) {
+      router.navigate({
+        pathname: '/alarm/edit',
+        params: { id: params.alarmId, soundId: sound.id },
+      } as any);
+    }
+  };
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -50,12 +76,14 @@ export default function SoundsScreen() {
           <Card style={[styles.upgradeCard, { backgroundColor: colors.accentSoft, borderColor: colors.accent }]}>
             <Icon name="sparkles" size={20} color={colors.accent} />
             <View style={styles.upgradeText}>
-              <Text style={[typography.bodyStrong, { color: colors.text }]}>Desbloquea los {SOUNDS.length - freeSoundCount()} sonidos Premium</Text>
+              <Text style={[typography.bodyStrong, { color: colors.text }]}>
+                Desbloquea los {SOUNDS.length - freeSoundCount()} sonidos Premium
+              </Text>
               <Text style={[typography.micro, { color: colors.textMuted }]}>
-                Activa la prueba simulada para escucharlos y usarlos en cualquier alarma.
+                Obtén acceso completo para usarlos en cualquiera de tus alarmas.
               </Text>
             </View>
-            <Button label="Probar" size="sm" onPress={() => setPremium(true)} />
+            <Button label="Mejorar" size="sm" onPress={() => router.push('/(tabs)/premium')} />
           </Card>
         ) : (
           <View style={[styles.activePill, { backgroundColor: colors.successSoft }]}>
@@ -69,9 +97,11 @@ export default function SoundsScreen() {
             <SoundRow
               key={sound.id}
               sound={sound}
+              isSelected={sound.id === params.selectedId}
               locked={isSoundLocked(sound, settings.premium)}
               previewing={previewingId === sound.id}
               onTogglePreview={() => setPreviewingId((current) => (current === sound.id ? null : sound.id))}
+              onSelect={() => handleSelectSound(sound)}
             />
           ))}
         </View>
@@ -79,9 +109,7 @@ export default function SoundsScreen() {
         <Card style={styles.noteCard}>
           <Icon name="info" size={17} color={colors.textMuted} />
           <Text style={[typography.micro, { color: colors.textMuted, flex: 1 }]}>
-            El sonido dentro de la app y el sonido de la notificación del sistema son cosas distintas. Estos sonidos se
-            reproducen en la pantalla de alarma; el aviso previo usa el sonido por defecto del teléfono, porque
-            Expo Go no permite instalar sonidos de notificación personalizados.
+            Toca el botón de reproducción para escuchar una vista previa o toca la tarjeta para seleccionar el sonido de tu alarma.
           </Text>
         </Card>
       </ScrollView>
@@ -91,19 +119,18 @@ export default function SoundsScreen() {
 
 type SoundRowProps = {
   sound: SoundEntry;
+  isSelected: boolean;
   locked: boolean;
   previewing: boolean;
   onTogglePreview: () => void;
+  onSelect: () => void;
 };
 
-function SoundRow({ sound, locked, previewing, onTogglePreview }: SoundRowProps) {
+function SoundRow({ sound, isSelected, locked, previewing, onTogglePreview, onSelect }: SoundRowProps) {
   const { colors } = useTheme();
-  // One player per row keeps previews independent and lets the OS stop a
-  // preview when the row unmounts.
   const player = useAudioPlayer(sound.source);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/immutability -- native player handle, mutated by design
     player.loop = false;
   }, [player]);
 
@@ -112,35 +139,38 @@ function SoundRow({ sound, locked, previewing, onTogglePreview }: SoundRowProps)
       player.pause();
       return;
     }
-    // `seekTo` is the only async member here.
     player.seekTo(0).catch(() => {});
     player.play();
   }, [previewing, player]);
 
   return (
     <Pressable
-      onPress={() => {
-        if (locked) return;
-        tapFeedback();
-        onTogglePreview();
-      }}
-      disabled={locked}
+      onPress={onSelect}
       accessibilityRole="button"
       accessibilityLabel={`${sound.name}${locked ? ', bloqueado' : ''}`}
       style={({ pressed }) => [
         styles.row,
-        { backgroundColor: colors.surface, borderColor: previewing ? colors.accent : colors.border },
-        pressed && !locked && { opacity: 0.75 },
+        { backgroundColor: colors.surface, borderColor: isSelected ? colors.accent : previewing ? colors.accentSoft : colors.border },
+        isSelected && { borderWidth: 2 },
+        pressed && { opacity: 0.8 },
         locked && { opacity: 0.6 },
       ]}
     >
-      <View style={[styles.playButton, { backgroundColor: previewing ? colors.accent : colors.accentSoft }]}>
+      <Pressable
+        onPress={(e) => {
+          e.stopPropagation();
+          tapFeedback();
+          onTogglePreview();
+        }}
+        hitSlop={8}
+        style={[styles.playButton, { backgroundColor: previewing ? colors.accent : colors.accentSoft }]}
+      >
         <Icon
           name={previewing ? 'pause' : 'play'}
           size={16}
           color={previewing ? colors.accentOn : colors.accent}
         />
-      </View>
+      </Pressable>
 
       <View style={styles.rowText}>
         <View style={styles.rowTitleLine}>
@@ -158,7 +188,13 @@ function SoundRow({ sound, locked, previewing, onTogglePreview }: SoundRowProps)
         </Text>
       </View>
 
-      {locked ? <Icon name="lock" size={16} color={colors.warning} /> : <Icon name="chevron-right" size={18} color={colors.textFaint} />}
+      {locked ? (
+        <Icon name="lock" size={16} color={colors.warning} />
+      ) : isSelected ? (
+        <Icon name="check" size={18} color={colors.accent} strokeWidth={2.5} />
+      ) : (
+        <Icon name="chevron-right" size={18} color={colors.textFaint} />
+      )}
     </Pressable>
   );
 }

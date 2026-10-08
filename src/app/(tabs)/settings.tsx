@@ -1,8 +1,11 @@
 import { useRouter } from 'expo-router';
+import { signOut } from 'firebase/auth';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '../../components/screen-header';
+import { Button, Card, Chip, Icon, SegmentedControl, Stepper, SummaryRow, ToggleRow } from '../../components/ui';
 import {
   detectCalendarSupport,
   getPermission as getCalendarPermission,
@@ -12,6 +15,7 @@ import {
   type CalendarOption,
   type CalendarPermission,
 } from '../../core/calendar';
+import { auth } from '../../core/firebase';
 import {
   getNotificationPermissionState,
   openSystemNotificationSettings,
@@ -19,15 +23,12 @@ import {
   type NotificationPermissionState,
 } from '../../core/notifications';
 import { storage } from '../../core/storage';
-import { accents, type AccentName } from '../../theme/tokens';
 import { useAlarms } from '../../state/AlarmsContext';
 import { useReminders } from '../../state/RemindersContext';
 import { useSettings } from '../../state/SettingsContext';
 import { tabBarStore } from '../../state/useTabBar';
 import { useTheme } from '../../theme/ThemeProvider';
-import { fonts, radius, spacing, typography } from '../../theme/tokens';
-import { Button, Card, Chip, SegmentedControl, Stepper , SummaryRow, ToggleRow , Icon } from '../../components/ui';
-import { ScreenHeader } from '../../components/screen-header';
+import { accents, fonts, radius, spacing, typography, type AccentName } from '../../theme/tokens';
 
 const ACCENTS: AccentName[] = ['mint', 'violet', 'sky', 'amber', 'coral'];
 
@@ -35,7 +36,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { settings, update, resetSettings, setPremium, trialDaysLeft } = useSettings();
+  const { settings, update, resetSettings, setPremium, trialDaysLeft, currentUser } = useSettings();
   const { alarms, stats, rescheduleAll } = useAlarms();
   const { reminders } = useReminders();
 
@@ -87,6 +88,27 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleSignOut = () => {
+    Alert.alert(
+      'Cerrar sesión',
+      '¿Estás seguro de que deseas salir de tu cuenta?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Cerrar sesión',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await signOut(auth);
+            } catch (error: any) {
+              Alert.alert('Error al salir', error.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const confirmReset = () => {
     Alert.alert(
       'Borrar todos los datos',
@@ -119,6 +141,20 @@ export default function SettingsScreen() {
         onScroll={(event) => tabBarStore.setVisible(event.nativeEvent.contentOffset.y < 120)}
         scrollEventThrottle={16}
       >
+        {/* ---------------------------- Cuenta ---------------------------- */}
+        {currentUser ? (
+          <Card style={styles.card}>
+            <GroupTitle icon="shield" title="Cuenta" status={{ text: 'Activa', tone: 'success' }} />
+            <Text style={[typography.caption, { color: colors.textMuted }]}>
+              Sesión iniciada como:
+            </Text>
+            <Text style={[typography.bodyStrong, { color: colors.text }]}>
+              {currentUser.email}
+            </Text>
+            <Button label="Cerrar sesión" variant="danger" fullWidth onPress={handleSignOut} />
+          </Card>
+        ) : null}
+
         {/* ---------------------------- Perfil ---------------------------- */}
         <Card style={styles.card}>
           <Text style={[typography.heading, { color: colors.text }]}>Tu nombre</Text>
@@ -377,7 +413,7 @@ export default function SettingsScreen() {
             </Text>
           ) : null}
           <SummaryRow
-            label={settings.premium ? 'Ver benefits' : 'Mejorar a Premium'}
+            label={settings.premium ? 'Ver beneficios' : 'Mejorar a Premium'}
             onPress={() => router.push('/(tabs)/premium')}
             icon={<Icon name="sparkles" size={17} color={colors.warning} />}
           />
@@ -390,7 +426,7 @@ export default function SettingsScreen() {
         <Card style={styles.card}>
           <GroupTitle icon="shield" title="Datos" />
           <Text style={[typography.caption, { color: colors.textMuted }]}>
-            Todo se guarda solo en este dispositivo. No hay servidor, cuenta ni sincronización.
+            Los datos se sincronizan con tu cuenta de Firebase y se almacenan localmente en tu dispositivo.
           </Text>
           <Button label="Restablecer preferencias" variant="ghost" fullWidth onPress={resetSettings} />
           <Button label="Borrar todos los datos" variant="danger" fullWidth onPress={confirmReset} />
