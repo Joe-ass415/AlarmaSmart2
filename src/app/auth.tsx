@@ -5,7 +5,7 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'fire
 
 import { useRouter } from '../hooks/useRouter';
 import { doc, setDoc } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -41,19 +41,11 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const autoTriggered = useRef(false);
 
   const isLogin = mode === 'login';
 
-  useEffect(() => {
-    (async () => {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-      const savedEmail = await SecureStore.getItemAsync(SECURE_EMAIL_KEY);
-      setBiometricAvailable(hasHardware && isEnrolled && !!savedEmail);
-    })();
-  }, []);
-
-  const handleBiometricLogin = async () => {
+  const handleBiometricLogin = useCallback(async () => {
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: 'Ingresa con tu huella o Face ID',
       fallbackLabel: 'Usar contraseña',
@@ -80,7 +72,22 @@ export default function AuthScreen() {
       setLoading(false);
       Alert.alert('Error de Autenticación', error.message);
     }
-  };
+  }, [router]);
+
+  useEffect(() => {
+    (async () => {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      const savedEmail = await SecureStore.getItemAsync(SECURE_EMAIL_KEY);
+      const available = hasHardware && isEnrolled && !!savedEmail;
+      setBiometricAvailable(available);
+
+      if (available && !autoTriggered.current) {
+        autoTriggered.current = true;
+        await handleBiometricLogin();
+      }
+    })();
+  }, [handleBiometricLogin]);
 
   const handleAuth = async () => {
     if (!email || !password) {
