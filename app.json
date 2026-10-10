@@ -7,11 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "smartalarm",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "supportsTablet": true
     },
@@ -28,17 +23,27 @@
     "plugins": [
       "expo-router",
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ],
+      [
         "@stripe/stripe-react-native",
         {
           "merchantIdentifier": "merchant.com.smartalarm",
           "enableGooglePay": true
         }
-      ]
+      ],
+      "expo-secure-store",
+      "expo-local-authentication"
     ],
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "6071fbac-0082-4d49-99dc-8e2fd84028dd"
+        "projectId": "82d56ae2-69eb-475e-a7be-d6101175ee14"
       }
     }
   }

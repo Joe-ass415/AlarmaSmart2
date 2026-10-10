@@ -40,7 +40,9 @@ export type IconName =
   | 'arrow-up-right'
   | 'repeat'
   | 'flag'
-  | 'gauge';
+  | 'gauge'
+  | 'mail'
+  | 'fingerprint';
 
 type IconProps = {
   name: IconName;
@@ -306,6 +308,23 @@ function renderPaths(name: IconName, common: Record<string, unknown>, stroke: st
           <Path {...common} d="M3.6 17a9.5 9.5 0 1 1 16.8 0" />
           <Line {...common} x1="12" y1="16" x2="16" y2="10.5" />
           <Circle {...common} cx="12" cy="17" r="1.6" />
+        </>
+      );
+    case 'mail':
+      return (
+        <>
+          <Rect {...common} x="3" y="5.5" width="18" height="13" rx="3" />
+          <Polyline {...common} points="4 7.5 12 13 20 7.5" />
+        </>
+      );
+    case 'fingerprint':
+      return (
+        <>
+          <Path {...common} d="M12 10a2 2 0 0 1 2 2v4" />
+          <Path {...common} d="M9.5 9a4.5 4.5 0 0 1 7.5 3.4V15" />
+          <Path {...common} d="M7 8.4A7 7 0 0 1 19 12v1.5" />
+          <Path {...common} d="M4.5 10.5A9.5 9.5 0 0 1 21.5 12v3" />
+          <Line {...common} x1="12" y1="10" x2="12" y2="22" />
         </>
       );
     default:

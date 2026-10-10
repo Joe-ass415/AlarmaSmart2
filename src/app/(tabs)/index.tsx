@@ -1,7 +1,8 @@
-import { useRouter } from 'expo-router';
 import { useCallback, useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useRouter } from '../../hooks/useRouter';
 
 import { formatDateLong, greetingFor } from '../../core/date';
 import { useAlarms } from '../../state/AlarmsContext';

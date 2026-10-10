@@ -1,11 +1,13 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useRouter } from '../../hooks/useRouter';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ModalHeader } from '../../components/modal-header';
 import { Button, Card, Chip, Icon, SegmentedControl, Stepper, SummaryRow, ToggleRow, WeekdayPicker } from '../../components/ui';
 import { formatDays, formatTime, nextOccurrence } from '../../core/date';
+import { takePendingSound } from '../../core/selection';
 import { getSound, isSoundLocked, SOUNDS } from '../../core/sounds';
 import type { Alarm, DismissMode, HapticStrength } from '../../core/types';
 import { useAlarms, type AlarmDraft } from '../../state/AlarmsContext';
@@ -50,7 +52,7 @@ function toDraft(alarm: Alarm): AlarmDraft {
   };
 }
 
-type AlarmEditParams = { id?: string; hour?: string; minute?: string; fromEvent?: string; soundId?: string };
+type AlarmEditParams = { id?: string; hour?: string; minute?: string; fromEvent?: string };
 
 function fromParams(params: AlarmEditParams, base: AlarmDraft): AlarmDraft {
   const hour = Number(params.hour);
@@ -80,12 +82,12 @@ export default function EditAlarmScreen() {
     setDraft(toDraft(editing));
   }
 
-  // Escuchar cuando el usuario regresa de la pantalla de sonidos con una nueva selección
-  useEffect(() => {
-    if (params.soundId) {
-      setDraft((current) => ({ ...current, soundId: params.soundId as string }));
-    }
-  }, [params.soundId]);
+  useFocusEffect(
+    useCallback(() => {
+      const id = takePendingSound();
+      if (id) setDraft((current) => ({ ...current, soundId: id }));
+    }, [])
+  );
 
   const sound = getSound(draft.soundId);
   const soundLocked = isSoundLocked(sound, settings.premium);
@@ -118,18 +120,6 @@ export default function EditAlarmScreen() {
       <ModalHeader
         title={editing ? 'Editar alarma' : 'Nueva alarma'}
         onClose={() => router.back()}
-        right={
-          <Pressable
-            onPress={save}
-            disabled={saving}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Guardar"
-            style={({ pressed }) => [styles.saveButton, { backgroundColor: colors.accent }, pressed && { opacity: 0.8 }]}
-          >
-            <Text style={[typography.bodyStrong, { color: colors.accentOn }]}>Guardar</Text>
-          </Pressable>
-        }
       />
 
       <ScrollView
@@ -303,7 +293,7 @@ export default function EditAlarmScreen() {
 /* ------------------------------- TimePicker ------------------------------ */
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
-const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+const MINUTES = Array.from({ length: 60 }, (_, i) => i);
 
 function TimePicker({
   hour,
@@ -373,11 +363,6 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: spacing.lg,
     gap: spacing.lg,
-  },
-  saveButton: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: 9,
-    borderRadius: radius.pill,
   },
   card: {
     gap: spacing.sm,

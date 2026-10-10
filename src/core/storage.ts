@@ -7,6 +7,7 @@ export const StorageKeys = {
   alarms: `${PREFIX}alarms`,
   reminders: `${PREFIX}reminders`,
   dismissLog: `${PREFIX}dismissLog`,
+  servedOccurrences: `${PREFIX}servedOccurrences`,
   seeded: `${PREFIX}seeded`,
 } as const;
 

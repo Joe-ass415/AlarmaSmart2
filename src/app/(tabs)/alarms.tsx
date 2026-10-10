@@ -1,7 +1,8 @@
-import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useRouter } from '../../hooks/useRouter';
 
 import { formatClock, formatRelative, nextOccurrence } from '../../core/date';
 import { impactFeedback } from '../../core/haptics';
@@ -160,7 +161,7 @@ export default function AlarmsScreen() {
                     size="sm"
                     variant="ghost"
                     icon={<Icon name="play" size={13} color={colors.text} />}
-                    onPress={() => startRinging(alarm.id)}
+                    onPress={() => startRinging(alarm.id, false, true)}
                   />
                   <Button
                     label="Eliminar"

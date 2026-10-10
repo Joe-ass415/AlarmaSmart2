@@ -33,7 +33,9 @@ export async function ensureChannels() {
     enableVibrate: true,
     vibrationPattern: [0, 600, 400, 600, 400],
     bypassDnd: true,
-    sound: 'default',
+    // `sound` must be omitted to use the system notification sound. Any string
+    // value is treated as a custom asset name and logged as missing, because
+    // no sounds are registered in the expo-notifications config plugin.
   });
 
   await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
@@ -43,7 +45,6 @@ export async function ensureChannels() {
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     enableVibrate: true,
     vibrationPattern: [0, 250, 200, 250],
-    sound: 'default',
   });
 }
 

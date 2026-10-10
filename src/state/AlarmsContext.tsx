@@ -2,7 +2,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react';
 
-import { nextOccurrence } from '../core/date';
+import { DAY_MS, nextOccurrence } from '../core/date';
 import { auth, db } from '../core/firebase';
 import {
   cancelScheduled,
@@ -17,6 +17,10 @@ import { useSettings } from './SettingsContext';
 
 /** How often the foreground ticker checks for a due alarm. */
 const TICK_MS = 15_000;
+/** Grace period that catches an occurrence which started a moment ago. */
+const OCCURRENCE_GRACE_MS = 90_000;
+/** Served occurrences older than this are pruned from storage. */
+const SERVED_RETENTION_MS = 7 * DAY_MS;
 const MAX_LOG_ENTRIES = 100;
 
 export type RingingState = {
@@ -56,7 +60,7 @@ type AlarmsContextValue = {
   toggleAlarm: (id: string, enabled: boolean) => Promise<void>;
   rescheduleAll: () => Promise<void>;
 
-  startRinging: (alarmId: string, fromNotification?: boolean) => void;
+  startRinging: (alarmId: string, fromNotification?: boolean, isPreview?: boolean) => void;
   completeRinging: (alarmId: string, outcome: DismissOutcome, shakes: number) => Promise<void>;
   snoozeRinging: (alarmId: string) => Promise<void>;
 };
@@ -69,6 +73,31 @@ function persistAlarms(alarms: Alarm[]) {
   void storage.writeJson(StorageKeys.alarms, alarms);
 }
 
+/**
+ * Maps an alarm id to the timestamp of the occurrence already served, so an
+ * alarm is only rung once per scheduled event no matter how many times the
+ * challenge is completed.
+ */
+type ServedMap = Record<string, number>;
+
+function persistServed(served: Map<string, number>) {
+  void storage.writeJson(StorageKeys.servedOccurrences, Object.fromEntries(served));
+}
+
+/**
+ * The occurrence a ringing alarm is allowed to consume.
+ *
+ * Within the grace period this is the occurrence that just started; outside it,
+ * the upcoming one. Returns null when the alarm is not due yet, which prevents
+ * a manual "Probar" from swallowing a real, upcoming occurrence.
+ */
+function dueOccurrenceAt(alarm: Alarm, from: number): number | null {
+  const due = nextOccurrence(alarm.hour, alarm.minute, alarm.weekdays, new Date(from - OCCURRENCE_GRACE_MS)).getTime();
+  if (due <= from) return due;
+  const upcoming = nextOccurrence(alarm.hour, alarm.minute, alarm.weekdays, new Date(from)).getTime();
+  return upcoming - from <= OCCURRENCE_GRACE_MS ? upcoming : null;
+}
+
 export function AlarmsProvider({ children }: PropsWithChildren) {
   const { settings, ready: settingsReady } = useSettings();
   const [alarms, setAlarms] = useState<Alarm[]>([]);
@@ -77,8 +106,30 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
   const [permission, setPermission] = useState<NotificationPermissionState>('undetermined');
   const [ringing, setRinging] = useState<RingingState>(null);
 
-  /** Prevents the ticker from re-ringing an alarm already on screen. */
-  const handledRef = useRef(new Set<string>());
+  /** Occurrence already served per alarm; guards against re-ringing the same event. */
+  const servedRef = useRef(new Map<string, number>());
+
+  /**
+   * Marks an occurrence as consumed. Doing this instead of clearing a flag is
+   * what makes "complete the challenge once" stick: the alarm stays silenced
+   * until `nextOccurrence` moves past the recorded timestamp.
+   */
+  const markServed = useCallback((alarmId: string, occurrenceAt: number | null) => {
+    if (occurrenceAt === null) return;
+    const previous = servedRef.current.get(alarmId);
+    if (previous !== undefined && previous >= occurrenceAt) return;
+    servedRef.current.set(alarmId, occurrenceAt);
+    persistServed(servedRef.current);
+  }, []);
+
+  const markServedForAlarm = useCallback(
+    (alarmId: string, now: number) => {
+      const alarm = alarms.find((item) => item.id === alarmId);
+      if (!alarm) return;
+      markServed(alarmId, dueOccurrenceAt(alarm, now));
+    },
+    [alarms, markServed]
+  );
 
   /* ----------------------------- load local ----------------------------- */
   useEffect(() => {
@@ -86,8 +137,15 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
     Promise.all([
       storage.readJson<Alarm[]>(StorageKeys.alarms, []),
       storage.readJson<DismissLog[]>(StorageKeys.dismissLog, []),
-    ]).then(([storedAlarms, storedLog]) => {
+      storage.readJson<ServedMap>(StorageKeys.servedOccurrences, {}),
+    ]).then(([storedAlarms, storedLog, storedServed]) => {
       if (!mounted) return;
+      // Restoring the served occurrences keeps an alarm silenced after an app
+      // restart, so a completed challenge is never asked twice.
+      const cutoff = Date.now() - SERVED_RETENTION_MS;
+      servedRef.current = new Map(
+        Object.entries(storedServed).filter(([, at]) => typeof at === 'number' && at > cutoff)
+      );
       setAlarms(storedAlarms);
       setDismissLog(storedLog);
       setReady(true);
@@ -177,11 +235,14 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
         if (current) return current;
         const due = alarms.find((alarm) => {
           if (!alarm.enabled) return false;
-          if (handledRef.current.has(alarm.id)) return false;
-          const occurrence = nextOccurrence(alarm.hour, alarm.minute, alarm.weekdays, new Date(now - 90_000));
-          const isDue = occurrence.getTime() <= now;
-          if (isDue) handledRef.current.add(alarm.id);
-          return isDue;
+          const occurrenceAt = dueOccurrenceAt(alarm, now);
+          if (occurrenceAt === null) return false;
+          // Already consumed by an earlier ring: wait for the next occurrence.
+          const served = servedRef.current.get(alarm.id);
+          if (served !== undefined && served >= occurrenceAt) return false;
+          servedRef.current.set(alarm.id, occurrenceAt);
+          persistServed(servedRef.current);
+          return true;
         });
         return due ? { alarmId: due.id, rangAt: now, fromNotification: false } : null;
       });
@@ -260,7 +321,8 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
       return next;
     });
 
-    handledRef.current.delete(id);
+    servedRef.current.delete(id);
+    persistServed(servedRef.current);
 
     // Eliminar de Firestore
     if (auth.currentUser) {
@@ -314,10 +376,16 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
 
   /* ---------------------------- ringing ---------------------------- */
 
-  const startRinging = useCallback((alarmId: string, fromNotification = false) => {
-    handledRef.current.add(alarmId);
-    setRinging({ alarmId, rangAt: Date.now(), fromNotification });
-  }, []);
+  const startRinging = useCallback(
+    (alarmId: string, fromNotification = false, isPreview = false) => {
+      const now = Date.now();
+      // A manual "Probar" must not consume the upcoming occurrence, otherwise
+      // testing an alarm would silently cancel the real one.
+      if (!isPreview) markServedForAlarm(alarmId, now);
+      setRinging({ alarmId, rangAt: now, fromNotification });
+    },
+    [markServedForAlarm]
+  );
 
   const recordDismiss = useCallback((alarm: Alarm | undefined, alarmId: string, outcome: DismissOutcome, shakes: number, rangAt: number) => {
     const entry: DismissLog = {
@@ -341,10 +409,12 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
       const alarm = alarms.find((a) => a.id === alarmId);
       const rangAt = ringing?.rangAt ?? Date.now();
       recordDismiss(alarm, alarmId, outcome, shakes, rangAt);
-      handledRef.current.delete(alarmId);
+      // The occurrence stays consumed on purpose. Clearing it here is what made
+      // the alarm ring again right after the challenge was completed.
+      markServedForAlarm(alarmId, Date.now());
       setRinging(null);
     },
-    [alarms, ringing, recordDismiss]
+    [alarms, ringing, recordDismiss, markServedForAlarm]
   );
 
   const snoozeRinging = useCallback(
@@ -354,7 +424,9 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
       recordDismiss(alarm, alarmId, 'snooze', 0, rangAt);
 
       const snoozeUntil = new Date(Date.now() + (alarm?.snoozeMinutes ?? 5) * 60_000);
-      handledRef.current.delete(alarmId);
+      // The original occurrence is consumed; the snooze re-rings through its own
+      // scheduled notification.
+      markServedForAlarm(alarmId, Date.now());
       setRinging(null);
 
       if (alarm && settings.alarmNotificationsEnabled && permission === 'granted') {
@@ -376,7 +448,7 @@ export function AlarmsProvider({ children }: PropsWithChildren) {
         });
       }
     },
-    [alarms, ringing, recordDismiss, settings.alarmNotificationsEnabled, permission]
+    [alarms, ringing, recordDismiss, markServedForAlarm, settings.alarmNotificationsEnabled, permission]
   );
 
   /* ---------------------------- derived ---------------------------- */

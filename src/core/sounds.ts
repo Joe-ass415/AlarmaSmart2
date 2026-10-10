@@ -98,6 +98,23 @@ export function getUiSoundSource(id: keyof typeof UI_SOUNDS) {
   return UI_SOUNDS[id];
 }
 
+/**
+ * Pauses an expo-audio player without throwing.
+ *
+ * `pause()` is typed as sync but dispatches onto the native main thread, where it
+ * rejects when the underlying player was already released (for example while the
+ * ringing screen unmounts). Left unhandled, that rejection surfaces in the logs.
+ */
+export function safePause(player: { playing: boolean; pause: () => void } | null | undefined) {
+  if (!player) return;
+  try {
+    if (!player.playing) return;
+    player.pause();
+  } catch {
+    // The player was released or in an invalid state; nothing left to silence.
+  }
+}
+
 export function isSoundLocked(sound: SoundEntry, isPremium: boolean) {
   return sound.tier === 'premium' && !isPremium;
 }

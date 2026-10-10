@@ -1,7 +1,8 @@
-import { useRouter } from 'expo-router';
 import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useRouter } from '../hooks/useRouter';
 
 import { formatDateWithTime } from '../core/date';
 import type { DismissOutcome } from '../core/types';

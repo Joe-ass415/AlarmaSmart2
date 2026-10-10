@@ -1,9 +1,10 @@
 import { useStripe } from '@stripe/stripe-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
 import { useState } from 'react';
+
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from '../../hooks/useRouter';
 
 import { ScreenHeader } from '../../components/screen-header';
 import { Button, Card, Icon, type IconName } from '../../components/ui';
@@ -14,7 +15,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { fonts, radius, spacing, typography } from '../../theme/tokens';
 
 // Reemplaza esta URL con tu dirección de ngrok o tu servidor backend en Node.js
-const SERVER_URL = 'https://bodacious-doorstep-womankind.ngrok-free.dev';
+const SERVER_URL = 'https://seven-boxes-stare.loca.lt';
 
 const FREE_FEATURES: { icon: IconName; title: string; detail: string }[] = [
   { icon: 'alarm', title: 'Alarmas con reto de agitación', detail: 'Ilimitadas, con días de repetición' },

@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { alertFeedback, errorFeedback, shakeFeedback, successFeedback } from '../../core/haptics';
-import { getSoundSource } from '../../core/sounds';
+import { getSoundSource, safePause } from '../../core/sounds';
 import type { DismissOutcome } from '../../core/types';
 import { useShakeDetector } from '../../hooks/useShakeDetector';
 import { useAlarms } from '../../state/AlarmsContext';
@@ -48,6 +48,7 @@ export default function RingingScreen() {
   const rangAtRef = useRef(0);
   const shakeCountRef = useRef(0);
   const phaseRef = useRef<Phase>('ringing');
+  const startedRef = useRef(false);
 
   useEffect(() => {
     if (!rangAtRef.current) rangAtRef.current = ringing?.rangAt ?? Date.now();
@@ -59,9 +60,13 @@ export default function RingingScreen() {
 
   /* --------------------- deep link / direct navigation -------------------- */
   // Reached when the screen is pushed directly (e.g. the "Probar" action)
-  // instead of through a scheduled alarm.
+  // instead of through a scheduled alarm. startedRef prevents this from
+  // re-firing after completeRinging sets ringing=null on the same mount.
   useEffect(() => {
-    if (!ringing && params.alarmId) startRinging(params.alarmId);
+    if (!ringing && params.alarmId && !startedRef.current) {
+      startedRef.current = true;
+      startRinging(params.alarmId, false, true);
+    }
   }, [ringing, params.alarmId, startRinging]);
 
   /* ------------------------------ audio ----------------------------------- */
@@ -71,13 +76,16 @@ export default function RingingScreen() {
   useEffect(() => {
     // The alarm must be audible even when the ringer switch is silenced.
     setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'mixWithOthers' }).catch(() => {});
-    // eslint-disable-next-line react-hooks/immutability -- native player handle, mutated by design
-    player.loop = true;
-    player.volume = 1;
-    // `play`/`pause` are synchronous; they reject internally on failure.
-    player.play();
+    try {
+      // eslint-disable-next-line react-hooks/immutability -- native player handle, mutated by design
+      player.loop = true;
+      player.volume = 1;
+      player.play();
+    } catch {
+      // Player not ready yet or already released; teardown will still silence it.
+    }
     return () => {
-      player.pause();
+      safePause(player);
       Vibration.cancel();
     };
   }, [player, soundId]);
@@ -98,10 +106,12 @@ export default function RingingScreen() {
 
   /* --------------------------- dismissal path ----------------------------- */
   const leave = useCallback(() => {
-    player.pause();
+    safePause(player);
     Vibration.cancel();
-    if (router.canGoBack()) router.back();
-    else router.replace('/(tabs)');
+    // `dismissTo` pops this modal without a GO_BACK dispatch, which throws
+    // "action 'GO_BACK' was not handled by any navigator" when the screen was
+    // the entry point of the stack.
+    router.dismissTo('/(tabs)');
   }, [player]);
 
   const dismiss = useCallback(
@@ -111,7 +121,7 @@ export default function RingingScreen() {
       setOutcome(result);
       if (options?.auto) setAutoStopped(true);
 
-      player.pause();
+      safePause(player);
       Vibration.cancel();
 
       if (result === 'shake') successFeedback();
@@ -121,8 +131,7 @@ export default function RingingScreen() {
         else await completeRinging(alarmId, result, shakes);
       }
 
-      if (router.canGoBack()) router.back();
-      else router.replace('/(tabs)');
+      router.dismissTo('/(tabs)');
     },
     [alarmId, completeRinging, player, setAutoStopped, setOutcome, setPhase, snoozeRinging]
   );

@@ -95,8 +95,12 @@ function AppShell({ ready }: { ready: boolean }) {
 
   // Alarma sonando
   useEffect(() => {
-    if (ringing) router.push('/alarm/ringing');
-  }, [ringing]);
+    // `pathname` guard: the ringing route may already be on the stack when the
+    // alarm re-triggers, and pushing again would stack duplicate screens.
+    if (!ringing) return;
+    if (pathname === '/alarm/ringing') return;
+    router.push('/alarm/ringing');
+  }, [ringing, pathname]);
 
   const navigationTheme = colorScheme === 'dark' ? DarkTheme : DefaultTheme;
 

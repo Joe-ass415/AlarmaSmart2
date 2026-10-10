@@ -1,5 +1,6 @@
 import { useAudioPlayer } from 'expo-audio';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '../hooks/useRouter';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,7 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ModalHeader } from '../components/modal-header';
 import { Button, Card, Chip, Icon, SegmentedControl } from '../components/ui';
 import { tapFeedback } from '../core/haptics';
-import { SOUNDS, freeSoundCount, isSoundLocked, type SoundEntry } from '../core/sounds';
+import { setPendingSound } from '../core/selection';
+import { SOUNDS, freeSoundCount, isSoundLocked, safePause, type SoundEntry } from '../core/sounds';
 import { useSettings } from '../state/SettingsContext';
 import { useTheme } from '../theme/ThemeProvider';
 import { radius, spacing, typography } from '../theme/tokens';
@@ -41,12 +43,9 @@ export default function SoundsScreen() {
     }
 
     tapFeedback();
-    // Si la pantalla fue abierta desde la edición de alarma, regresa devolviendo el soundId seleccionado
     if (params.selectedId !== undefined) {
-      router.navigate({
-        pathname: '/alarm/edit',
-        params: { id: params.alarmId, soundId: sound.id },
-      } as any);
+      setPendingSound(sound.id);
+      router.back();
     }
   };
 
@@ -131,12 +130,13 @@ function SoundRow({ sound, isSelected, locked, previewing, onTogglePreview, onSe
   const player = useAudioPlayer(sound.source);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability -- native player handle, mutated by design
     player.loop = false;
   }, [player]);
 
   useEffect(() => {
     if (!previewing) {
-      player.pause();
+      safePause(player);
       return;
     }
     player.seekTo(0).catch(() => {});

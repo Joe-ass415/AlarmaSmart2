@@ -1,7 +1,8 @@
-import { useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import { useRouter } from '../../hooks/useRouter';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScreenHeader } from '../../components/screen-header';

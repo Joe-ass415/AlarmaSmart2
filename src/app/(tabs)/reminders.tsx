@@ -1,7 +1,8 @@
-import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useRouter } from '../../hooks/useRouter';
 
 import { formatDateShort, formatTime, isSameDay, nextOccurrence } from '../../core/date';
 import { impactFeedback } from '../../core/haptics';

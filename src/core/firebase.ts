@@ -1,6 +1,8 @@
 // src/core/firebase.ts
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getApp, getApps, initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import * as FirebaseAuth from "firebase/auth";
+import { getAuth, initializeAuth, type Persistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -13,10 +15,38 @@ const firebaseConfig = {
 };
 
 // Evita inicializaciones duplicadas en Expo / React Native
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const isFirstInit = getApps().length === 0;
+const app = isFirstInit ? initializeApp(firebaseConfig) : getApp();
 
 // Exportaciones nombradas requeridas por la aplicación
 export const db = getFirestore(app);
-export const auth = getAuth(app);
+
+/**
+ * `getReactNativePersistence` only ships in the React Native build of the SDK
+ * (the `react-native` export condition of `@firebase/auth`), so TypeScript — which
+ * resolves the web typings — cannot see it. It is read off the namespace instead.
+ */
+const getReactNativePersistence = (FirebaseAuth as unknown as {
+  getReactNativePersistence?: (storage: typeof AsyncStorage) => Persistence;
+}).getReactNativePersistence;
+
+/**
+ * `getAuth` defaults to in-memory persistence on React Native, so the session
+ * is lost on every reload and the user is bounced back to the login screen.
+ * `initializeAuth` with AsyncStorage keeps the user signed in between restarts.
+ *
+ * It throws when auth was already initialized (e.g. a Fast Refresh), hence the
+ * guard that falls back to the default instance.
+ */
+function createAuth() {
+  if (!isFirstInit || !getReactNativePersistence) return getAuth(app);
+  try {
+    return initializeAuth(app, { persistence: getReactNativePersistence(AsyncStorage) });
+  } catch {
+    return getAuth(app);
+  }
+}
+
+export const auth = createAuth();
 
 export default app;
